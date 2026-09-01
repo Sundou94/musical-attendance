@@ -490,12 +490,19 @@
   .session-list{ margin-top:16px; }
   .session-month-group{ margin-bottom:10px; }
   .session-month-group:last-child{ margin-bottom:0; }
+  .session-month-title-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    margin:0 0 6px 2px;
+  }
   .session-month-title{
     font-size:12px;
     font-weight:800;
     color:var(--gray);
-    margin:0 0 6px 2px;
   }
+  .mini-btn.month-close{ background:#fff2d6; color:#a8760a; }
   .admin-session-row{
     display:flex;
     justify-content:space-between;
@@ -1066,12 +1073,20 @@ function renderSessionRowHtml(s){
 function renderSessionListHtml(){
   const groups = groupSessionsByMonth(state.sessions);
   if(groups.length === 0) return '<div class="hint">등록된 모임이 없어요.</div>';
-  return `<div class="session-list">${groups.map(g => `
+  return `<div class="session-list">${groups.map(g => {
+    const allClosed = g.items.every(s => s.closed === true || s.closed === "TRUE");
+    return `
     <div class="session-month-group">
-      <div class="session-month-title">${monthLabel(g.month)}</div>
+      <div class="session-month-title-row">
+        <span class="session-month-title">${monthLabel(g.month)}</span>
+        ${allClosed
+          ? `<span class="badge-status closed">마감 완료</span>`
+          : `<button class="mini-btn month-close closeMonthBtn" data-month="${g.month}">🔒 월마감</button>`}
+      </div>
       ${g.items.map(s => renderSessionRowHtml(s)).join("")}
     </div>
-  `).join("")}</div>`;
+  `;
+  }).join("")}</div>`;
 }
 
 function openAdminPanel(){
@@ -1082,7 +1097,7 @@ function openAdminPanel(){
 
     <div class="admin-section">
       <div class="section-title" style="margin-top:0">🎭 모임 관리</div>
-      <p class="hint">월과 모임 제목을 입력해서 새 모임을 추가하세요. 한 달에 여러 모임을 등록할 수 있어요.</p>
+      <p class="hint">월과 모임 제목을 입력해서 새 모임을 추가하세요. 한 달에 여러 모임을 등록할 수 있어요. 그 달의 모임이 모두 끝났으면 "🔒 월마감" 버튼을 눌러 수동으로 마감하세요 (자동 마감은 없어요).</p>
       <div class="session-add-row">
         <input type="text" id="newSessionMonth" class="month-input" placeholder="${currentMonthStr()}" value="${currentMonthStr()}" />
         <input type="text" id="newSessionTitle" placeholder="모임 제목 (예: 9월 정기모임)" />
@@ -1188,6 +1203,24 @@ function openAdminPanel(){
       try{
         await api("removeSession", { adminToken: state.adminToken, sessionId: id });
         showToast("모임을 삭제했어요");
+        await refreshAll();
+        openAdminPanel();
+      }catch(err){
+        resetBtnLoading(btn);
+        handleAdminError(err);
+      }
+    });
+  });
+
+  $sheet.querySelectorAll(".closeMonthBtn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      if(btn.dataset.loading) return; // 이중 클릭 방지
+      const month = btn.getAttribute("data-month");
+      if(!confirm(monthLabel(month) + " 모임을 모두 마감할까요?\n마감하면 해당 월의 모든 모임이 '마감'으로 표시되고, 라이프(연속 결석) 계산에도 반영돼요. 마감 후에는 되돌릴 수 없어요.")) return;
+      setBtnLoading(btn, "마감 처리 중...");
+      try{
+        const res = await api("closeMonth", { adminToken: state.adminToken, month });
+        showToast(monthLabel(month) + " 마감 완료! (모임 " + res.closedCount + "개)");
         await refreshAll();
         openAdminPanel();
       }catch(err){
