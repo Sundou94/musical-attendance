@@ -1035,13 +1035,26 @@ function openAdminLogin(){
   `);
   document.getElementById("closeX").addEventListener("click", closeOverlay);
   document.getElementById("cancelBtn").addEventListener("click", closeOverlay);
-  document.getElementById("loginBtn").addEventListener("click", async () => {
+  document.getElementById("loginBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if(btn.dataset.loading) return; // 이중 클릭 방지
     const pw = document.getElementById("adminPw").value;
     if(!pw){ showToast("비밀번호를 입력해주세요"); return; }
-    state.adminToken = pw;
-    // 아직 서버에 검증하지 않았으므로, 첫 관리 액션 시 오류가 나면 초기화
-    closeOverlay();
-    openAdminPanel();
+    setBtnLoading(btn, "확인 중...");
+    try{
+      // 로그인 시점에 서버에서 바로 비밀번호를 검증합니다.
+      await api("adminLogin", { adminToken: pw });
+      state.adminToken = pw;
+      closeOverlay();
+      openAdminPanel();
+    }catch(err){
+      resetBtnLoading(btn);
+      if(String(err.message).includes("INVALID_ADMIN")){
+        showToast("비밀번호가 올바르지 않아요 🔒", 2400);
+      }else{
+        showToast("오류: " + err.message, 2600);
+      }
+    }
   });
 }
 
