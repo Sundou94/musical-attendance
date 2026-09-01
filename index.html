@@ -952,8 +952,9 @@ function openAdminPanel(){
 
     <div class="admin-section">
       <div class="section-title" style="margin-top:0">➕ 멤버 추가</div>
+      <p class="hint">이름/생년/성별 형식으로 입력해주세요. (예: 홍길동/95/남) 동명이인을 구분하기 위해 생년을 꼭 함께 적어주세요.</p>
       <label>이름</label>
-      <input type="text" id="newName" placeholder="이름" />
+      <input type="text" id="newName" placeholder="이름/생년/성별 (예: 홍길동/95/남)" />
       <label>가입 월 (YYYY-MM)</label>
       <input type="text" id="newJoinMonth" placeholder="${currentMonthStr()}" value="${currentMonthStr()}" />
       <button class="btn btn-primary" id="addMemberBtn">멤버 추가하기</button>
