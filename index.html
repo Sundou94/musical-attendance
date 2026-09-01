@@ -238,6 +238,8 @@
   }
   .month-card.checked{ border-color:#ffd0a8; background:#fffaf3; }
   .month-card.locked{ opacity:.65; }
+  .month-card.loading{ pointer-events:none; opacity:.85; }
+  .spinner.small{ width:26px; height:26px; border-width:3px; }
   .month-card .month-label{ font-size:17px; font-weight:800; }
   .month-card .month-status{
     font-size:12.5px;
@@ -362,6 +364,18 @@
   .btn-primary{ background:var(--pink); color:#fff; }
   .btn-secondary{ background:#eee3ff; color:var(--purple); }
   .btn-ghost{ background:none; color:var(--gray); font-weight:600; }
+  .btn:disabled{ opacity:.65; cursor:not-allowed; }
+  .btn-spinner{
+    display:inline-block;
+    width:12px;height:12px;
+    border-radius:50%;
+    border:2px solid currentColor;
+    border-top-color:transparent;
+    opacity:.85;
+    animation:spin .7s linear infinite;
+    vertical-align:-2px;
+    margin-right:6px;
+  }
   .close-x{
     position:absolute; top:14px; right:16px;
     background:none;border:none;font-size:18px;color:var(--gray);cursor:pointer;
@@ -429,7 +443,8 @@ let state = {
   attendance: [],
   selectedMember: null,
   carouselIndex: 0,
-  adminToken: null
+  adminToken: null,
+  checkInPending: false
 };
 
 const $content = document.getElementById("content");
@@ -463,6 +478,22 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({
     "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
   }[c]));
+}
+
+// 버튼 이중 클릭 방지 + 전송 중 로딩 표시
+function setBtnLoading(btn, loadingText){
+  if(!btn || btn.dataset.loading) return;
+  btn.dataset.loading = "1";
+  btn.dataset.origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="btn-spinner"></span>${escapeHtml(loadingText || "처리 중...")}`;
+}
+function resetBtnLoading(btn){
+  if(!btn || !btn.dataset.loading) return;
+  btn.disabled = false;
+  btn.innerHTML = btn.dataset.origHtml || btn.innerHTML;
+  delete btn.dataset.loading;
+  delete btn.dataset.origHtml;
 }
 
 async function api(action, payload){
@@ -698,7 +729,23 @@ function renderCarousel(months){
 }
 
 async function toggleCheckIn(month, months){
+  if(state.checkInPending) return; // 전송 중 이중 탭 방지
   const member = state.selectedMember;
+
+  state.checkInPending = true;
+  const $card = document.getElementById("monthCard");
+  const $prev = document.getElementById("prevBtn");
+  const $next = document.getElementById("nextBtn");
+  if($card){
+    $card.classList.add("loading");
+    $card.innerHTML = `
+      <div class="spinner small"></div>
+      <div class="month-status">전송 중...</div>
+    `;
+  }
+  if($prev) $prev.disabled = true;
+  if($next) $next.disabled = true;
+
   try{
     const res = await api("checkIn", { memberId: member.id, month });
     // attendance 로컬 상태 갱신
@@ -709,9 +756,11 @@ async function toggleCheckIn(month, months){
     } else {
       showToast("체크를 취소했어요");
     }
-    renderDetail(months);
   }catch(err){
     showToast("오류: " + err.message, 2600);
+  }finally{
+    state.checkInPending = false;
+    renderDetail(months);
   }
 }
 
@@ -796,43 +845,54 @@ function openAdminPanel(){
     closeOverlay();
   });
 
-  document.getElementById("addSessionBtn").addEventListener("click", async () => {
+  document.getElementById("addSessionBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if(btn.dataset.loading) return; // 이중 클릭 방지
+    setBtnLoading(btn, "여는 중...");
     try{
       await api("addSession", { adminToken: state.adminToken, month: currentMonthStr() });
       showToast("이번 달 세션을 열었어요! 🎬");
       await refreshAll();
       openAdminPanel();
     }catch(err){
+      resetBtnLoading(btn);
       handleAdminError(err);
     }
   });
 
-  document.getElementById("addMemberBtn").addEventListener("click", async () => {
+  document.getElementById("addMemberBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if(btn.dataset.loading) return; // 이중 클릭 방지
     const name = document.getElementById("newName").value.trim();
     const joinMonth = document.getElementById("newJoinMonth").value.trim() || currentMonthStr();
     if(!name){ showToast("이름을 입력해주세요"); return; }
+    setBtnLoading(btn, "추가하는 중...");
     try{
       await api("addMember", { adminToken: state.adminToken, name, joinMonth });
       showToast(name + "님을 추가했어요! 🎉");
       await refreshAll();
       openAdminPanel();
     }catch(err){
+      resetBtnLoading(btn);
       handleAdminError(err);
     }
   });
 
   $sheet.querySelectorAll(".removeBtn").forEach(btn => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", async (e) => {
+      if(btn.dataset.loading) return; // 이중 클릭 방지
       const id = btn.getAttribute("data-id");
       const member = state.members.find(m => m.id === id);
       if(!member) return;
       if(!confirm(member.name + "님을 강퇴 처리할까요?")) return;
+      setBtnLoading(btn, "처리 중...");
       try{
         await api("removeMember", { adminToken: state.adminToken, memberId: id });
         showToast(member.name + "님을 강퇴했어요");
         await refreshAll();
         openAdminPanel();
       }catch(err){
+        resetBtnLoading(btn);
         handleAdminError(err);
       }
     });
