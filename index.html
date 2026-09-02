@@ -153,6 +153,86 @@
     line-height:1.7;
   }
 
+  /* ---------- 상단 탭 (출석 / 모임) ---------- */
+  .tab-bar{
+    display:flex;
+    gap:6px;
+    background:var(--card);
+    border-radius:16px;
+    padding:5px;
+    box-shadow: var(--shadow);
+    margin-bottom:14px;
+  }
+  .tab-btn{
+    flex:1;
+    border:none;
+    background:transparent;
+    padding:10px 0;
+    border-radius:12px;
+    font-size:14px;
+    font-weight:800;
+    color:var(--gray);
+    cursor:pointer;
+    transition: background .15s ease, color .15s ease, transform .1s ease;
+  }
+  .tab-btn:active{ transform: scale(0.97); }
+  .tab-btn.active{
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    color:#fff;
+  }
+
+  /* ---------- 모임 탭: 모임별 참여자 한눈에 보기 ---------- */
+  .session-month-block{ margin-bottom:18px; }
+  .session-month-block:last-child{ margin-bottom:0; }
+  .session-att-card{
+    background:var(--card);
+    border-radius:18px;
+    padding:14px 16px;
+    box-shadow: var(--shadow);
+    margin-bottom:10px;
+  }
+  .session-att-card:last-child{ margin-bottom:0; }
+  .session-att-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+  }
+  .session-att-title{
+    font-weight:800;
+    font-size:14.5px;
+    line-height:1.4;
+    word-break:keep-all;
+    overflow-wrap:break-word;
+  }
+  .session-att-sub{
+    font-size:12px;
+    color:var(--gray);
+    margin-top:6px;
+  }
+  .attendee-chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top:10px;
+  }
+  .attendee-chip{
+    background:#f4edff;
+    color:var(--purple);
+    font-size:12.5px;
+    font-weight:700;
+    padding:6px 12px;
+    border-radius:20px;
+    cursor:pointer;
+    transition: transform .1s ease;
+    border:none;
+  }
+  .attendee-chip:active{ transform: scale(0.93); }
+  .no-attendee{
+    font-size:12.5px;
+    color:var(--gray);
+  }
+
   /* ---------- detail view ---------- */
   .detail{
     animation: slideUp .25s ease;
@@ -596,7 +676,8 @@ let state = {
   monthIndex: 0,
   adminToken: null,
   checkInPending: false,
-  editingSessionId: null
+  editingSessionId: null,
+  activeTab: "attendance"
 };
 
 const $content = document.getElementById("content");
@@ -753,9 +834,38 @@ function heartsHtml(lives, size){
 ========================================================= */
 function renderMain(){
   state.selectedMember = null;
-  const activeMembers = state.members.filter(m => m.status !== "removed");
+  if(!state.activeTab) state.activeTab = "attendance";
 
   $content.innerHTML = `
+    <div class="tab-bar">
+      <button class="tab-btn ${state.activeTab === "attendance" ? "active" : ""}" data-tab="attendance">📋 출석</button>
+      <button class="tab-btn ${state.activeTab === "sessions" ? "active" : ""}" data-tab="sessions">🎭 모임</button>
+    </div>
+    <div id="tabContent"></div>
+  `;
+
+  $content.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tab = btn.getAttribute("data-tab");
+      if(state.activeTab === tab) return;
+      state.activeTab = tab;
+      renderMain();
+    });
+  });
+
+  if(state.activeTab === "sessions"){
+    renderSessionsTab();
+  }else{
+    renderAttendanceTab();
+  }
+}
+
+/* ---------- 출석 탭: 멤버 검색/목록 (기존 기능) ---------- */
+function renderAttendanceTab(){
+  const activeMembers = state.members.filter(m => m.status !== "removed");
+  const $tabContent = document.getElementById("tabContent");
+
+  $tabContent.innerHTML = `
     <div class="search-wrap">
       <span class="icon">🔍</span>
       <input id="searchInput" type="text" placeholder="이름을 검색해보세요" autocomplete="off" />
@@ -803,6 +913,58 @@ function renderMain(){
 
   renderList("");
   $input.addEventListener("input", (e) => renderList(e.target.value));
+}
+
+/* ---------- 모임 탭: 모임별로 누가 참여했는지 한눈에 보기 ---------- */
+function renderSessionsTab(){
+  const $tabContent = document.getElementById("tabContent");
+  const groups = groupSessionsByMonth(state.sessions); // 최신 월이 먼저
+
+  if(groups.length === 0){
+    $tabContent.innerHTML = `<div class="empty-msg">아직 등록된 모임이 없어요.<br/>운영진이 모임을 등록하면 여기에 표시돼요 🎬</div>`;
+    return;
+  }
+
+  $tabContent.innerHTML = groups.map(g => `
+    <div class="session-month-block">
+      <div class="session-month-title-row">
+        <span class="session-month-title">${monthLabel(g.month)}</span>
+      </div>
+      ${g.items.map(s => renderSessionAttendanceCard(s)).join("")}
+    </div>
+  `).join("");
+
+  $tabContent.querySelectorAll(".attendee-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const id = chip.getAttribute("data-id");
+      const member = state.members.find(m => m.id === id);
+      if(member) openDetail(member);
+    });
+  });
+}
+
+function renderSessionAttendanceCard(session){
+  const isClosed = session.closed === true || session.closed === "TRUE";
+  const attendees = state.attendance
+    .filter(a => a.sessionId === session.id)
+    .map(a => state.members.find(m => m.id === a.memberId))
+    .filter(Boolean)
+    .sort((a,b) => String(a.name||"").localeCompare(String(b.name||""), "ko"));
+
+  return `
+    <div class="session-att-card">
+      <div class="session-att-head">
+        <span class="session-att-title">${escapeHtml(session.title || "(제목 없음)")}</span>
+        <span class="badge-status ${isClosed ? "closed" : "open"}">${isClosed ? "마감" : "진행중"}</span>
+      </div>
+      <div class="session-att-sub">참여 ${attendees.length}명</div>
+      <div class="attendee-chips">
+        ${attendees.length
+          ? attendees.map(m => `<button class="attendee-chip" data-id="${m.id}">${escapeHtml(m.name)}</button>`).join("")
+          : `<span class="no-attendee">아직 참여자가 없어요</span>`}
+      </div>
+    </div>
+  `;
 }
 
 /* =========================================================
