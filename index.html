@@ -182,6 +182,29 @@
   }
 
   /* ---------- 모임 탭: 모임별 참여자 한눈에 보기 ---------- */
+  .sessions-tab-header{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    margin-bottom:10px;
+  }
+  .refresh-btn{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    background:var(--card);
+    color:var(--purple);
+    border:none;
+    padding:8px 14px;
+    border-radius:14px;
+    font-size:12.5px;
+    font-weight:800;
+    box-shadow: var(--shadow);
+    cursor:pointer;
+    transition: transform .12s ease;
+  }
+  .refresh-btn:active{ transform: scale(0.94); }
+  .refresh-btn:disabled{ opacity:.6; cursor:not-allowed; }
   .session-month-block{ margin-bottom:18px; }
   .session-month-block:last-child{ margin-bottom:0; }
   .session-att-card{
@@ -610,10 +633,13 @@
   }
   .badge-status.open{ background:#e9f7ec; color:#2f9e52; }
   .badge-status.closed{ background:#f1eef7; color:#8b7fa3; }
+  .badge-status.session-closed{ background:#ffe9e0; color:#c9502f; }
   .row-actions{
     display:flex;
     gap:6px;
     flex-shrink:0;
+    flex-wrap:wrap;
+    justify-content:flex-end;
   }
   .mini-btn{
     background:#eee3ff; color:var(--purple); border:none;
@@ -621,6 +647,7 @@
     white-space:nowrap;
   }
   .mini-btn.danger{ background:#fff0f0; color:#d9534f; }
+  .mini-btn.session-close{ background:#ffe3d6; color:#c9622f; }
   .mini-btn:disabled{ opacity:.6; cursor:not-allowed; }
   .admin-session-row.editing{
     flex-direction:column;
@@ -920,32 +947,59 @@ function renderSessionsTab(){
   const $tabContent = document.getElementById("tabContent");
   const groups = groupSessionsByMonth(state.sessions); // 최신 월이 먼저
 
+  const headerHtml = `
+    <div class="sessions-tab-header">
+      <button class="refresh-btn" id="sessionsRefreshBtn">🔄 새로고침</button>
+    </div>
+  `;
+
   if(groups.length === 0){
-    $tabContent.innerHTML = `<div class="empty-msg">아직 등록된 모임이 없어요.<br/>운영진이 모임을 등록하면 여기에 표시돼요 🎬</div>`;
-    return;
+    $tabContent.innerHTML = headerHtml + `<div class="empty-msg">아직 등록된 모임이 없어요.<br/>운영진이 모임을 등록하면 여기에 표시돼요 🎬</div>`;
+  }else{
+    $tabContent.innerHTML = headerHtml + groups.map(g => `
+      <div class="session-month-block">
+        <div class="session-month-title-row">
+          <span class="session-month-title">${monthLabel(g.month)}</span>
+        </div>
+        ${g.items.map(s => renderSessionAttendanceCard(s)).join("")}
+      </div>
+    `).join("");
+
+    $tabContent.querySelectorAll(".attendee-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        const id = chip.getAttribute("data-id");
+        const month = chip.getAttribute("data-month");
+        const member = state.members.find(m => m.id === id);
+        if(member) openDetail(member, month);
+      });
+    });
   }
 
-  $tabContent.innerHTML = groups.map(g => `
-    <div class="session-month-block">
-      <div class="session-month-title-row">
-        <span class="session-month-title">${monthLabel(g.month)}</span>
-      </div>
-      ${g.items.map(s => renderSessionAttendanceCard(s)).join("")}
-    </div>
-  `).join("");
-
-  $tabContent.querySelectorAll(".attendee-chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const id = chip.getAttribute("data-id");
-      const month = chip.getAttribute("data-month");
-      const member = state.members.find(m => m.id === id);
-      if(member) openDetail(member, month);
-    });
+  const $refreshBtn = document.getElementById("sessionsRefreshBtn");
+  $refreshBtn.addEventListener("click", async () => {
+    if($refreshBtn.dataset.loading) return; // 이중 클릭 방지
+    $refreshBtn.dataset.loading = "1";
+    $refreshBtn.disabled = true;
+    const origHtml = $refreshBtn.innerHTML;
+    $refreshBtn.innerHTML = `<span class="btn-spinner"></span>새로고침 중...`;
+    try{
+      await loadData();
+      showToast("실시간 출석 현황을 불러왔어요 🔄");
+      renderSessionsTab(); // 성공 시 탭 전체를 다시 그리므로 버튼도 새로 생성됨
+    }catch(err){
+      showToast("새로고침 실패: " + err.message, 2600);
+      $refreshBtn.disabled = false;
+      $refreshBtn.innerHTML = origHtml;
+      delete $refreshBtn.dataset.loading;
+    }
   });
 }
 
 function renderSessionAttendanceCard(session){
-  const isClosed = session.closed === true || session.closed === "TRUE";
+  const isMonthClosed = session.closed === true || session.closed === "TRUE";
+  const isCheckinClosed = session.checkinClosed === true || session.checkinClosed === "TRUE";
+  const statusLabel = isMonthClosed ? "마감" : (isCheckinClosed ? "출첵마감" : "진행중");
+  const statusClass = isMonthClosed ? "closed" : (isCheckinClosed ? "session-closed" : "open");
   const attendees = state.attendance
     .filter(a => a.sessionId === session.id)
     .map(a => state.members.find(m => m.id === a.memberId))
@@ -956,7 +1010,7 @@ function renderSessionAttendanceCard(session){
     <div class="session-att-card">
       <div class="session-att-head">
         <span class="session-att-title">${escapeHtml(session.title || "(제목 없음)")}</span>
-        <span class="badge-status ${isClosed ? "closed" : "open"}">${isClosed ? "마감" : "진행중"}</span>
+        <span class="badge-status ${statusClass}">${statusLabel}</span>
       </div>
       <div class="session-att-sub">참여 ${attendees.length}명</div>
       <div class="attendee-chips">
@@ -1031,21 +1085,23 @@ function renderCarousel(sessions){
   const isAttended = (s) => state.attendance.some(a => a.memberId === member.id && a.sessionId === s.id);
 
   const cardsHtml = group.items.map(session => {
-    const isClosed = session.closed === true || session.closed === "TRUE";
+    const isMonthClosed = session.closed === true || session.closed === "TRUE";
+    const isCheckinClosed = session.checkinClosed === true || session.checkinClosed === "TRUE";
+    const isLocked = isMonthClosed || isCheckinClosed;
     const attended = isAttended(session);
     return `
-      <div class="month-card ${attended ? "checked" : ""} ${isClosed ? "locked" : ""}" data-session-id="${session.id}">
+      <div class="month-card ${attended ? "checked" : ""} ${isLocked ? "locked" : ""}" data-session-id="${session.id}">
         <div class="card-top">
-          <div class="stamp">${attended ? "🎉" : (isClosed ? "😢" : "🎫")}</div>
+          <div class="stamp">${attended ? "🎉" : (isLocked ? "😢" : "🎫")}</div>
           <div class="session-info">
             <div class="session-title">${escapeHtml(session.title || "")}</div>
           </div>
         </div>
         <div class="card-bottom">
           <div class="month-status">
-            ${attended ? "참여 완료!" : (isClosed ? "참여 기록 없음 (마감됨)" : "아직 체크 전이에요")}
+            ${attended ? "참여 완료!" : (isLocked ? "참여 기록 없음 (마감됨)" : "아직 체크 전이에요")}
           </div>
-          ${isClosed ? "" : `<button class="checkin-btn ${attended ? "done" : ""}" data-session-id="${session.id}">${attended ? "취소하기" : "체크하기"}</button>`}
+          ${isLocked ? "" : `<button class="checkin-btn ${attended ? "done" : ""}" data-session-id="${session.id}">${attended ? "취소하기" : "체크하기"}</button>`}
         </div>
       </div>
     `;
@@ -1222,7 +1278,8 @@ function openAdminLogin(){
 }
 
 function renderSessionRowHtml(s){
-  const isClosed = s.closed === true || s.closed === "TRUE";
+  const isMonthClosed = s.closed === true || s.closed === "TRUE";
+  const isCheckinClosed = s.checkinClosed === true || s.checkinClosed === "TRUE";
   if(state.editingSessionId === s.id){
     return `
       <div class="admin-session-row editing" data-id="${s.id}">
@@ -1235,10 +1292,25 @@ function renderSessionRowHtml(s){
       </div>
     `;
   }
+
+  let statusBadge;
+  let checkinToggleBtn = "";
+  if(isMonthClosed){
+    // 월마감이 이미 된 모임은 어차피 체크인이 불가능하므로 모임마감 토글은 숨김
+    statusBadge = `<span class="badge-status closed">마감</span>`;
+  }else if(isCheckinClosed){
+    statusBadge = `<span class="badge-status session-closed">출첵마감</span>`;
+    checkinToggleBtn = `<button class="mini-btn reopenSessionBtn" data-id="${s.id}">마감 취소</button>`;
+  }else{
+    statusBadge = `<span class="badge-status open">진행중</span>`;
+    checkinToggleBtn = `<button class="mini-btn session-close closeSessionCheckinBtn" data-id="${s.id}">🔒 모임마감</button>`;
+  }
+
   return `
     <div class="admin-session-row" data-id="${s.id}">
-      <span class="session-row-label">${escapeHtml(s.title || "(제목 없음)")} <span class="badge-status ${isClosed ? "closed" : "open"}">${isClosed ? "마감" : "진행중"}</span></span>
+      <span class="session-row-label">${escapeHtml(s.title || "(제목 없음)")} ${statusBadge}</span>
       <div class="row-actions">
+        ${checkinToggleBtn}
         <button class="mini-btn editSessionBtn" data-id="${s.id}">수정</button>
         <button class="mini-btn danger removeSessionBtn" data-id="${s.id}">삭제</button>
       </div>
@@ -1273,7 +1345,9 @@ function openAdminPanel(){
 
     <div class="admin-section">
       <div class="section-title" style="margin-top:0">🎭 모임 관리</div>
-      <p class="hint">월과 모임 제목을 입력해서 새 모임을 추가하세요. 한 달에 여러 모임을 등록할 수 있어요. 그 달의 모임이 모두 끝났으면 "🔒 월마감" 버튼을 눌러 수동으로 마감하세요 (자동 마감은 없어요).</p>
+      <p class="hint">월과 모임 제목을 입력해서 새 모임을 추가하세요. 한 달에 여러 모임을 등록할 수 있어요.<br/>
+        각 모임의 "🔒 모임마감"은 그 모임이 끝난 뒤 체크인만 막는 기능이에요 (라이프 계산에는 영향 없음, 언제든 "마감 취소"로 되돌릴 수 있어요).<br/>
+        그 달의 모임이 모두 끝나서 라이프(연속 결석)를 계산하려면 "🔒 월마감" 버튼을 눌러 수동으로 마감하세요 (자동 마감은 없어요).</p>
       <div class="session-add-row">
         <input type="text" id="newSessionMonth" class="month-input" placeholder="${currentMonthStr()}" value="${currentMonthStr()}" />
         <input type="text" id="newSessionTitle" placeholder="모임 제목 (예: 9월 정기모임)" />
@@ -1397,6 +1471,43 @@ function openAdminPanel(){
       try{
         const res = await api("closeMonth", { adminToken: state.adminToken, month });
         showToast(monthLabel(month) + " 마감 완료! (모임 " + res.closedCount + "개)");
+        await refreshAll();
+        openAdminPanel();
+      }catch(err){
+        resetBtnLoading(btn);
+        handleAdminError(err);
+      }
+    });
+  });
+
+  $sheet.querySelectorAll(".closeSessionCheckinBtn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      if(btn.dataset.loading) return; // 이중 클릭 방지
+      const id = btn.getAttribute("data-id");
+      const s = state.sessions.find(x => x.id === id);
+      if(!s) return;
+      if(!confirm((s.title || "이 모임") + "의 출석 체크를 막을까요?\n모임마감을 하면 참여자들이 더 이상 체크인/체크아웃을 할 수 없어요. 라이프(연속 결석) 계산에는 영향을 주지 않아요. 나중에 '마감 취소'를 눌러 언제든 되돌릴 수 있어요.")) return;
+      setBtnLoading(btn, "처리 중...");
+      try{
+        await api("setSessionCheckin", { adminToken: state.adminToken, sessionId: id, checkinClosed: true });
+        showToast("모임을 마감했어요 (출석 체크 불가)");
+        await refreshAll();
+        openAdminPanel();
+      }catch(err){
+        resetBtnLoading(btn);
+        handleAdminError(err);
+      }
+    });
+  });
+
+  $sheet.querySelectorAll(".reopenSessionBtn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      if(btn.dataset.loading) return; // 이중 클릭 방지
+      const id = btn.getAttribute("data-id");
+      setBtnLoading(btn, "처리 중...");
+      try{
+        await api("setSessionCheckin", { adminToken: state.adminToken, sessionId: id, checkinClosed: false });
+        showToast("모임 마감을 취소했어요 (출석 체크 다시 가능)");
         await refreshAll();
         openAdminPanel();
       }catch(err){
