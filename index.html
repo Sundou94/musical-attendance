@@ -937,8 +937,9 @@ function renderSessionsTab(){
   $tabContent.querySelectorAll(".attendee-chip").forEach(chip => {
     chip.addEventListener("click", () => {
       const id = chip.getAttribute("data-id");
+      const month = chip.getAttribute("data-month");
       const member = state.members.find(m => m.id === id);
-      if(member) openDetail(member);
+      if(member) openDetail(member, month);
     });
   });
 }
@@ -960,7 +961,7 @@ function renderSessionAttendanceCard(session){
       <div class="session-att-sub">참여 ${attendees.length}명</div>
       <div class="attendee-chips">
         ${attendees.length
-          ? attendees.map(m => `<button class="attendee-chip" data-id="${m.id}">${escapeHtml(m.name)}</button>`).join("")
+          ? attendees.map(m => `<button class="attendee-chip" data-id="${m.id}" data-month="${escapeHtml(session.month)}">${escapeHtml(m.name)}</button>`).join("")
           : `<span class="no-attendee">아직 참여자가 없어요</span>`}
       </div>
     </div>
@@ -970,14 +971,14 @@ function renderSessionAttendanceCard(session){
 /* =========================================================
    렌더링 — 상세(월별 체크) 화면
 ========================================================= */
-function openDetail(member){
+function openDetail(member, targetMonth){
   state.selectedMember = member;
   const sessions = sessionsForMember(member);
 
-  // 이번 달을 기본으로 보여주되, 없으면 가장 마지막 월
+  // targetMonth가 지정되면 그 달을, 아니면 이번 달을 기본으로 보여주되, 없으면 가장 마지막 월
   const groups = monthGroupsFor(sessions);
-  const cm = currentMonthStr();
-  let idx = groups.findIndex(g => g.month === cm);
+  const wantMonth = targetMonth || currentMonthStr();
+  let idx = groups.findIndex(g => g.month === wantMonth);
   if(idx === -1) idx = groups.length - 1;
   state.monthIndex = idx;
 
